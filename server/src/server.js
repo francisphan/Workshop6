@@ -9,6 +9,7 @@ var Util = require('./util');
 app.use(express.static('../client/build'));
 
 var StatusUpdateSchema = require('./schemas/statusupdate.json');
+var CommentSchema = require('./schemas/comment.json');
 
 var database = require('./database');
 var readDocument = database.readDocument;
@@ -98,6 +99,79 @@ app.post('/feeditem',
     res.status(401).end();
   }
 });
+
+function postComment(feedItemId, author, contents) {
+  var feedItem = readDocument('feedItems', feedItemId);
+
+  feedItem.comments.push({
+    "author": author,
+    "postDate": new Date().getTime(),
+    "contents": contents,
+    "likeCounter": []
+  });
+  writeDocument('feedItems', feedItem);
+  return getFeedItemSync(feedItemId);
+}
+
+app.post('/feeditem/:feeditemid/comment',
+          validate({ body: CommentSchema }), function(req, res) {
+    var fromUser = getUserIdFromToken(req.get('Authorization'));
+    var body = req.body;
+    var feedItemId = req.params.feeditemid;
+
+    if (fromUser === body.author) {
+
+      var updatedFeedItem = postComment(feedItemId, body.author, body.contents);
+
+      res.status(201);
+      res.set('Location', '/feeditem/' + updatedFeedItem._id);
+      res.send(updatedFeedItem);
+    } else {
+      res.status(401).end();
+    }
+});
+
+app.put('/feeditem/:feeditemid/comments/:commentid/likelist/:userid', function(req, res){
+  var fromUser = getUserIdFromToken(req.get('Authorization'));
+
+  var feedItemId = parseInt(req.params.feeditemid,10);
+  var commentId = parseInt(req.params.commentid, 10);
+  var userId = parseInt(req.params.userid, 10);
+  if(fromUser === userId){
+    var feedItem = readDocument('feedItems', feedItemId);
+    if(feedItem.comments[commentId].likeCounter.indexOf(userId) === -1) {
+      feedItem.comments[commentId].likeCounter.push(userId);
+      writeDocument('feedItems', feedItem);
+      feedItem.comments[commentId].author = readDocument('users', feedItem.comments[commentId].author);
+    }
+    res.status(201);
+    res.send(feedItem.comments[commentId]);
+  } else {
+    res.status(401).end();
+  }
+})
+
+app.delete('/feeditem/:feeditemid/comments/:commentid/likelist/:userid', function(req, res) {
+  var fromUser = getUserIdFromToken(req.get('Authorization'));
+  var feedItemId = parseInt(req.params.feeditemid,10);
+  var commentId = parseInt(req.params.commentid, 10);
+  var userId = parseInt(req.params.userid, 10);
+
+  if(fromUser === userId){
+    var feedItem = readDocument('feedItems', feedItemId);
+    var likeIndex = feedItem.comments[commentId].likeCounter.indexOf(userId);
+    if (likeIndex !== -1){
+      feedItem.comments[commentId].likeCounter.splice(likeIndex, 1);
+      writeDocument('feedItems', feedItem);
+      feedItem.comments[commentId].author = readDocument('users', feedItem.comments[commentId].author);
+    }
+    res.status(201);
+    res.send(feedItem.comments[commentId]);
+  } else {
+    res.status(401).end();
+  }
+});
+
 /**
 * Get the feed data for a particular user.
 */
